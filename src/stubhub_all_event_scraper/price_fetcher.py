@@ -1,4 +1,4 @@
-"""Refresh matched events' Explore from-prices and convert explicit currencies to USD."""
+"""Fetch matched events' listing floor prices, or optional Explore display quotes, in USD."""
 
 import argparse
 import csv
@@ -28,6 +28,11 @@ PRICE_FIELDS = [
     "SH From Price",
     "SH Price Currency",
     "Price Checked At (UTC)",
+    "SH Floor Price",
+    "Price Source",
+    "SH Listing ID",
+    "SH Listing Count",
+    "Price Basis",
 ]
 DEFAULT_SYMBOLS = {
     "USD": {"US$", "USD"},
@@ -51,6 +56,9 @@ class PriceConfig(RequestConfig):
     log_file: str = env_field("PRICE_LOG_FILE", "log/prices.log")
     explore_sort_type: str = env_field("EXPLORE_SORT_TYPE", "Distance")
     explore_page_size: int = env_field("EXPLORE_PAGE_SIZE", 100, int)
+    source: str = env_field("PRICE_SOURCE", "listings")
+    listing_page_size: int = env_field("PRICE_LISTING_PAGE_SIZE", 50, int)
+    listing_max_pages: int = env_field("PRICE_LISTING_MAX_PAGES", 100, int)
 
     def __post_init__(self):
         super().__post_init__()
@@ -64,6 +72,10 @@ class PriceConfig(RequestConfig):
         validate_number("request_interval", self.request_interval)
         validate_number("page_radius", self.page_radius)
         validate_number("explore_page_size", self.explore_page_size, 1)
+        validate_number("listing_page_size", self.listing_page_size, 1)
+        validate_number("listing_max_pages", self.listing_max_pages, 1)
+        if self.source not in {"listings", "explore"}:
+            raise ValueError("Price source must be listings or explore")
 
 
 def utc_now():
@@ -200,17 +212,24 @@ def parse_price(value, currencies):
     raise ValueError("invalid_price")
 
 
-def to_usd(amount, currency, currencies):
+def usd_amount(amount, currency, currencies):
+    """Keep precision for comparing listing prices before cent rounding."""
     if currency == "USD":
-        return amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        return amount
     rates = {item.get("code"): item.get("currentRate") for item in currencies}
     try:
         usd_rate, source_rate = Decimal(str(rates["USD"])), Decimal(str(rates[currency]))
         if not all(rate.is_finite() and rate > 0 for rate in (usd_rate, source_rate)):
             raise ValueError("Invalid exchange rate")
-        return (amount * usd_rate / source_rate).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        return amount * usd_rate / source_rate
     except (KeyError, InvalidOperation, ValueError) as exc:
         raise ValueError("fx_error") from exc
+
+
+def to_usd(amount, currency, currencies):
+    return usd_amount(amount, currency, currencies).quantize(
+        Decimal("0.01"), rounding=ROUND_HALF_UP
+    )
 
 
 def price_result(event, currencies):
@@ -245,8 +264,10 @@ class PriceSession:
             )
         self.last_request = time.monotonic()
 
-    def fetch(self, url):
-        return get_json(url, self.config, cookie_file=self.cookie_file, before_request=self.pace)
+    def fetch(self, url, **kwargs):
+        return get_json(
+            url, self.config, cookie_file=self.cookie_file, before_request=self.pace, **kwargs
+        )
 
 
 def save_json(path, payload):
@@ -342,9 +363,22 @@ def enriched_rows(rows, checks):
             **row,
             "Price (USD)": checks[event_id(row)]["usd"],
             "Price Status": checks[event_id(row)]["status"],
-            "SH From Price": checks[event_id(row)]["quote"],
             "SH Price Currency": checks[event_id(row)]["currency"],
             "Price Checked At (UTC)": checks[event_id(row)]["checked_at"],
+            "SH From Price": (
+                checks[event_id(row)]["quote"]
+                if checks[event_id(row)].get("source", "explore") == "explore"
+                else ""
+            ),
+            "SH Floor Price": (
+                checks[event_id(row)]["quote"]
+                if checks[event_id(row)].get("source") == "listing_grid"
+                else ""
+            ),
+            "Price Source": checks[event_id(row)].get("source", "explore"),
+            "SH Listing ID": checks[event_id(row)].get("listing_id", ""),
+            "SH Listing Count": checks[event_id(row)].get("listing_count", ""),
+            "Price Basis": checks[event_id(row)].get("basis", "Explore displayed from-price"),
         }
         for row in rows
     ]
@@ -355,9 +389,10 @@ def markdown_report(rows, checks):
     lines = [
         "# StubHub price refresh",
         "",
-        "USD amounts convert SH Explore's displayed from-price. Fees and checkout totals "
-        "are not independently verified. Blank amounts remain unknown; no_quote does not "
-        "confirm zero inventory.",
+        "Listing floors require a complete event listing response across all pages. "
+        "Explore quotes are a separate optional source. Prices are per ticket as returned; "
+        "fees and checkout totals are not independently verified. Blank amounts remain "
+        "unknown; only an explicit empty listing result is marked no_listings.",
         "",
         f"Unique events: {len(checks)}. Statuses: {dict(counts)}.",
         "",
@@ -402,7 +437,7 @@ def markdown_report(rows, checks):
 def run(config):
     fields, rows = read_csv(config.input_csv)
     ids = {event_id(row) for row in rows}
-    sources = locate_sources(ids, config) if ids else {}
+    sources = locate_sources(ids, config) if ids and config.source == "explore" else {}
     output = Path(config.output_dir)
     # Prevent accidental replacement of a source or stale evidence by a rerun.
     if output.exists() and any(output.iterdir()):
@@ -417,12 +452,14 @@ def run(config):
         "page_radius": config.page_radius,
         "sort_type": config.explore_sort_type,
         "page_size": config.explore_page_size,
+        "source": config.source,
+        "listing_page_size": config.listing_page_size,
+        "listing_max_pages": config.listing_max_pages,
     }
-    for label, path in (
-        ("matches", config.input_csv),
-        ("events", config.events_csv),
-        ("cities", config.cities_csv),
-    ):
+    inputs = [("matches", config.input_csv)]
+    if config.source == "explore":
+        inputs.extend([("events", config.events_csv), ("cities", config.cities_csv)])
+    for label, path in inputs:
         report["inputs"][label] = {
             "path": path,
             "sha256": hashlib.sha256(Path(path).read_bytes()).hexdigest(),
@@ -444,7 +481,12 @@ def run(config):
             except ResponseError as exc:
                 report["settings_error"] = str(exc)
                 logger.warning("USD conversions may be unavailable: %s", exc)
-        checks, requests = refresh(ids, sources, config, session, output, currencies)
+        if config.source == "listings":
+            from .listing_prices import refresh_listings
+
+            checks, requests = refresh_listings(rows, config, session, output, currencies)
+        else:
+            checks, requests = refresh(ids, sources, config, session, output, currencies)
         result_rows = enriched_rows(rows, checks)
         report.update(
             completed_at=utc_now(),
@@ -467,13 +509,14 @@ def run(config):
             "fx_error",
             "ambiguous_currency",
             "invalid_price",
+            "incomplete",
         }
         return int(bool(errors & report["status_counts"].keys()) or "settings_error" in report)
     finally:
         session.cookie_file.unlink(missing_ok=True)
 
 
-def main():
+def main(argv=None):
     config = PriceConfig()
     parser = argparse.ArgumentParser(description=__doc__)
     for option in (
@@ -487,7 +530,10 @@ def main():
         parser.add_argument("--" + option.replace("_", "-"), default=getattr(config, option))
     parser.add_argument("--page-radius", type=int, default=config.page_radius)
     parser.add_argument("--request-interval", type=float, default=config.request_interval)
-    args = parser.parse_args()
+    parser.add_argument("--source", choices=("listings", "explore"), default=config.source)
+    parser.add_argument("--listing-page-size", type=int, default=config.listing_page_size)
+    parser.add_argument("--listing-max-pages", type=int, default=config.listing_max_pages)
+    args = parser.parse_args(argv)
     try:
         config = replace(config, **vars(args))
         configure_logging(config.log_file, config.log_level)

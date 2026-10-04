@@ -7,9 +7,10 @@
 | Venue enrichment | `venue_map_fetcher.py` | Unique numeric event/category pairs → atomic JSON; validate existing cache before skipping. |
 | Ticketmaster collection | `ticketmaster_cancelled_event_scraper.py` | Country/date/category pages → deduplicated cancelled-event snapshot; validate pagination before publishing. |
 | Matching | `cancelled_event_intersection.py` | Two CSVs → strict date/location and fuzzy venue/title intersection; scores retained for audit. |
-| Price refresh | `price_fetcher.py` | Matches + discovery seeds → displayed from-price in USD, explicit status, original rows/links and raw evidence; shared page requests, bounded search, fresh rates. |
+| Price refresh | `price_fetcher.py`, `listing_prices.py` | Matches → complete event listing minimum in USD, original rows/links, status and raw evidence; optional Explore quotes use discovery seeds, shared page requests and bounded search. Live listing responses remain unverified under HTTP 403. |
+| Cancellation workflow | `cancelled_workflow.py` | Existing SH/TM snapshots → intersection + enriched prices in a fresh directory; input hashes, stage status and evidence paths in a manifest; nonzero exit for incomplete/failed prices. |
 | Configuration | `config.py` | Environment defaults read at instance construction; validate limits, finite delays and booleans. No dotenv loader. |
-| HTTP | `http.py` | Shared StubHub curl transport; HTTP/JSON checks, timeout and exponential retry, capped at 60 seconds; optional session cookies and per-attempt pacing. |
+| HTTP | `http.py` | Shared StubHub curl transport; HTTP/JSON checks, timeout and exponential retry, capped at 60 seconds; optional JSON POST, raw failure response capture, session cookies and per-attempt pacing. |
 | Runtime | `runtime.py` | CLI-only logging, bounded worker queue and atomic CSV/JSON publication. |
 | Official API check | `scripts/verify_ticketmaster_api.py` | Two small official API access probes; private local key file, redacted output; no feed download. |
 

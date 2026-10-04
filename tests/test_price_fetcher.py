@@ -41,6 +41,7 @@ class PriceFetcherTests(unittest.TestCase):
             request_interval=0,
             max_retries=1,
             page_radius=1,
+            source="explore",
         )
         Path(self.config.cities_csv).write_text("country,name,lat,lng\nUS,Test City,1.2,-3.4\n")
         Path(self.config.events_csv).write_text(

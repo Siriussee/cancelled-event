@@ -12,6 +12,19 @@ Require a cancelled/canceled Ticketmaster status and reject explicit
 and normalized city; require US state agreement when both states are present.
 A recognized venue country overrides the StubHub seed city's country.
 
+To match existing snapshots and fetch listing floor prices in one run:
+
+```bash
+stubhub-cancelled-workflow \
+  --stubhub-csv output/events.csv \
+  --ticketmaster-csv output/ticketmaster_cancelled_events.csv \
+  --output-dir output/cancelled/new-run
+```
+
+This uses the same matcher and keeps every match pair/link in the priced CSV.
+See [price refresh](price_refresh.md) for complete-pagination requirements and
+the current HTTP 403 limitation.
+
 After accent/punctuation normalization, require venue similarity ≥ 0.86 and
 title similarity ≥ 0.80. Whole-phrase title containment also qualifies when the
 shorter title has at least two words and eight characters. Attraction scores

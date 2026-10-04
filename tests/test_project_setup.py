@@ -35,6 +35,7 @@ class ProjectSetupTests(unittest.TestCase):
                 "ticketmaster-scrape-cancelled-events",
                 "stubhub-find-cancelled-overlap",
                 "stubhub-fetch-prices",
+                "stubhub-cancelled-workflow",
             },
         )
 
@@ -88,7 +89,8 @@ class ProjectSetupTests(unittest.TestCase):
                         "import stubhub_all_event_scraper.ticketmaster_cancelled_event_scraper; "
                         "import stubhub_all_event_scraper.cancelled_event_intersection; "
                         "import stubhub_all_event_scraper.filter_worldcities_by_geonames_feature; "
-                        "import stubhub_all_event_scraper.price_fetcher"
+                        "import stubhub_all_event_scraper.price_fetcher; "
+                        "import stubhub_all_event_scraper.cancelled_workflow"
                     ),
                 ],
                 cwd=tmpdir,
