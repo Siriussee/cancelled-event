@@ -184,6 +184,7 @@ class EventPageTests(unittest.TestCase):
                 "sortDirection": ["0"],
                 "page": ["1"],
                 "estimatedFees": ["true"],
+                "currency": ["USD"],
             },
         )
 
@@ -196,7 +197,7 @@ class EventPageTests(unittest.TestCase):
             source.write_text(original)
             session = Mock(
                 fetch=Mock(return_value={"currencies": CURRENCIES}),
-                fetch_document=Mock(return_value=capture()),
+                fetch_document=Mock(return_value=capture("chad_usd")),
                 warmup=[],
             )
             config = price.PriceConfig(
@@ -205,14 +206,37 @@ class EventPageTests(unittest.TestCase):
             with patch.object(pages, "BrowserPriceSession", return_value=session):
                 self.assertEqual(price.run(config), 0)
             session.fetch_document.assert_called_once()
+            session.fetch.assert_not_called()
             session.close.assert_called_once()
             self.assertEqual(source.read_text(), original)
             with (root / "prices/enriched.csv").open() as handle:
                 rows = list(csv.DictReader(handle))
             self.assertEqual([row["Ticketmaster URL"] for row in rows], ["tm-one", "tm-two"])
             self.assertEqual([row["Price (USD)"] for row in rows], ["113.97"] * 2)
+            self.assertEqual([row["SH Floor Price"] for row in rows], ["USD 113.97"] * 2)
+            self.assertFalse((root / "prices/location_settings.json").exists())
             report = json.loads((root / "prices/checks.json").read_text())
             self.assertEqual([(r["method"], r["page"]) for r in report["requests"]], [("GET", 1)])
+            self.assertEqual(report["currency_mode"], "direct_usd")
+
+    def test_usd_request_must_be_honored_by_document_and_listing(self):
+        with self.assertRaisesRegex(ResponseError, "currency=USD"):
+            pages.document_grid(capture(), CHAD_ID, expected_currency="USD")
+        grid = pages.document_grid(capture("chad_usd"), CHAD_ID, expected_currency="USD")
+        result = pages.grid_result(grid, CHAD_ID, [])
+        self.assertEqual((result["quote"], result["usd"]), ("USD 113.97", "113.97"))
+        grid["items"][0]["buyerCurrencyCode"] = "CAD"
+        self.assertEqual(pages.grid_result(grid, CHAD_ID, [])["status"], "ambiguous_currency")
+
+    def test_ignored_usd_parameter_is_recorded_as_failure_without_price(self):
+        with tempfile.TemporaryDirectory() as temp:
+            session = Mock(fetch_document=Mock(return_value=capture()))
+            checks, _ = pages.refresh_event_pages(
+                [{"SH Event ID": CHAD_ID, "StubHub URL": CHAD_URL}], session, Path(temp), []
+            )
+            self.assertEqual(checks[CHAD_ID]["status"], "request_error")
+            self.assertEqual(checks[CHAD_ID]["usd"], "")
+            self.assertIn("currency=USD", checks[CHAD_ID]["error"])
 
     def test_http_failure_body_is_saved_and_browser_cleanup_is_idempotent(self):
         with tempfile.TemporaryDirectory() as temp:

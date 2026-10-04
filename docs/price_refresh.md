@@ -5,6 +5,8 @@
 `StubHub URL`, preserve every row and source link, and add USD prices,
 original currency amounts, observation time, listing IDs, counts and scope.
 No discovery seed or Explore snapshot is needed for browser prices.
+Browser prices explicitly request USD and validate the returned currency;
+they do not fetch exchange rates or convert the amount locally.
 
 ## Browser setup and workflow
 
@@ -31,7 +33,7 @@ installation. `PRICE_BROWSER_EXECUTABLE` and `PRICE_BROWSER_WAIT_SECONDS`
 (default 8 seconds per warmup page) provide the same settings.
 
 The workflow writes `intersection.csv`, `prices/enriched.csv`, `prices/report.md`,
-`prices/checks.json`, fresh `prices/location_settings.json`, original HTML in
+`prices/checks.json`, original HTML in
 `prices/raw/`, and `manifest.json`. The manifest includes input hashes and
 stage results. Inputs remain untouched; both commands require a fresh empty
 output directory. Empty intersections produce headers without starting a browser.
@@ -43,7 +45,7 @@ page, allowing normal site JavaScript to establish an anonymous session. It
 then navigates to each event with:
 
 ```text
-?quantity=0&sortBy=NEWPRICE&sortDirection=0&page=1&estimatedFees=true
+?quantity=0&sortBy=NEWPRICE&sortDirection=0&page=1&estimatedFees=true&currency=USD
 ```
 
 Only page one is requested for each distinct event; there is no listing POST,
@@ -60,6 +62,9 @@ are excluded from active prices. Unknown active listing prices invalidate the
 minimum; HTTP errors and challenge pages never mean zero inventory.
 The site's zero-ID empty-grid sentinel is accepted only inside a correctly
 identified event document with an empty item array and both explicit totals zero.
+The parent document must confirm `currencyCode=USD`; any active listing's
+explicit buyer currency must agree. An ignored USD parameter is an error,
+not a reason to relabel another currency as USD.
 
 The site's recommended-ticket grouping can reduce `totalCount` below
 `totalListingsCount`. Keep the original inventory count in `SH Listing Count`,
@@ -84,21 +89,28 @@ minimum in a complete grid is a validation error, rather than a guessed floor.
 
 Use the positive finite `rawPrice` with `buyerCurrencyCode` or explicit page
 `currencyCode`. `listingCurrencyCode` identifies the seller currency and must
-not be applied to `rawPrice`. For example, the live Chad Gray document has
-`rawPrice=162.37`, `buyerCurrencyCode=CAD`, `listingCurrencyCode=USD`, and a
-rounded UI `price="C$162"`. The correct native floor is **CAD 162.37**.
+not be applied to `rawPrice`. With the default `currency=USD`, a live Chad Gray
+document returned `rawPrice=113.97`, `buyerCurrencyCode=USD`, and the rounded
+UI `price="$114"`. The exact floor is **USD 113.97**. The site's own currency
+selection frontend uses this query parameter too.
 
-Convert with fresh browser `GetLocationSettings` rates:
-`amount × USD rate / source rate`, using decimal arithmetic and rounding only
-the final USD amount to cents. Do not infer currency from venue or hostname.
+The browser source records `currency_mode=direct_usd` and skips `GetLocationSettings`.
+`SH Floor Price` and `Price (USD)` come directly from the USD quote, preserving
+the raw amount before final cent rounding. Do not infer currency from venue
+or hostname. The previous CAD capture had `rawPrice=162.37` despite seller
+`listingCurrencyCode=USD`; that amount was CAD and remains a regression fixture.
 `estimatedFees` and the site's fee disclosure are retained in `checks.json`.
 Amounts are per ticket as returned; final checkout totals are not verified.
 
-A real Chad Gray capture on October 4, 2026 returned two actual listings at
-CAD 162.37, equal to the grid minimum, and USD 113.97 after conversion.
+A real Chad Gray capture at 19:24 UTC on October 4, 2026 returned two actual
+USD 113.97 listings, equal to the grid minimum, without an FX request.
 See [path investigation](floor_price_path.md) for live evidence and alternatives.
 
 ## Other sources
+
+Native POST and Explore sources retain fresh `GetLocationSettings` rates,
+saved as `location_settings.json`: `amount × USD rate / source rate`, using
+decimal arithmetic and rounding only the final USD amount to cents.
 
 `--source listings` retains the older native JSON POST adapter. It requests
 `ShowAllTickets=true`, `HideDuplicateTickets=false`, `SortBy=PRICE`,

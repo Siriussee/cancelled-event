@@ -412,7 +412,8 @@ def markdown_report(rows, checks):
     lines = [
         "# StubHub price refresh",
         "",
-        "Event-page prices use page one only. A floor requires complete coverage or "
+        "Event-page prices request USD directly and use page one only. "
+        "A floor requires complete coverage or "
         "agreement with the page's event minimum; page_priced is only the observed page minimum. "
         "Listing POST floors require complete pagination. "
         "Explore quotes are a separate optional source. Prices are per ticket as returned; "
@@ -479,7 +480,8 @@ def run(config):
     report = {
         "started_at": utc_now(),
         "inputs": {},
-        "settings_url": SETTINGS_URL,
+        "settings_url": SETTINGS_URL if config.source != "event-page" else None,
+        "currency_mode": "direct_usd" if config.source == "event-page" else "fresh_fx",
         "source_lookup": sources,
         "page_radius": config.page_radius,
         "sort_type": config.explore_sort_type,
@@ -500,7 +502,7 @@ def run(config):
         }
     currencies = []
     try:
-        if ids:
+        if ids and config.source != "event-page":
             try:
                 settings = session.fetch(SETTINGS_URL)
                 report["settings_checked_at"] = utc_now()
