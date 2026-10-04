@@ -2,8 +2,25 @@
 
 A warmed Playwright browser session successfully reads real listings from the
 original event HTML. This is now the default price source and is integrated
-with cancellation matching. The previous HTTP 403 limitation applies to direct
+with cancellation matching. Event documents now explicitly request USD and
+must confirm USD before a price is accepted. The previous HTTP 403 limitation applies to direct
 requests and the older POST adapter, not to the validated warmed-browser path.
+
+## Direct USD request
+
+The site's localization frontend changes currency through a `currency` query
+parameter. A live warmed-browser GET with `currency=USD` for Chad Gray at
+`2026-10-04T19:24:53.301966+00:00` returned `currencyCode=USD`, both listings'
+`buyerCurrencyCode=USD`, and `rawPrice=113.97`, equal to `grid.minPrice`.
+The UI rounded it to `$114`; the exact USD 113.97 amount needs no local FX.
+Raw evidence is in `output/usd_currency_probe_20261004/chad_usd.html` and
+`chad_usd.json`. A sanitized real extract is `tests/fixtures/chad_usd_event_page.html`.
+
+`first_page_url` now includes `currency=USD` by default; each parent document
+and listing currency is validated. The browser price pipeline skips currency
+settings and records `currency_mode=direct_usd`. Native POST and Explore retain
+their existing FX behavior. A page that ignores the USD request is an error,
+never a non-USD amount relabeled as USD.
 
 ## Paths explored
 
@@ -15,21 +32,21 @@ requests and the older POST adapter, not to the validated warmed-browser path.
 | Corrected browser listing POST with current frontend parameters | Timed out / challenge response | No successful POST listing evidence; do not require POST for the working path. |
 | Chromium homepage + Explore warmup, then sorted event GET | HTTP 200 with `app-context` and `index-data.grid` | Working path: original embedded listings, page one only. |
 | SEO `AggregateOffer.lowPrice` | Chad Gray showed CAD 89.56 while actual grid listings were CAD 162.37 | Exclude SEO metadata from current listing floors. |
-| Browser `GetLocationSettings` | HTTP 200 with current CAD/USD rates | Convert observed buyer-currency amounts with fresh rates. |
+| Browser `GetLocationSettings` | HTTP 200 with current CAD/USD rates in earlier captures | Previously used to convert buyer-currency quotes; direct USD requests no longer need it. |
 
 The browser uses a regular Chrome user agent, `en-US`, a Los Angeles timezone,
 and a 1440×900 viewport. It visits the homepage and Explore, waiting eight
 seconds on each, then navigates to the event with `quantity=0`,
-`sortBy=NEWPRICE`, `sortDirection=0`, `page=1`, and `estimatedFees=true`.
+`sortBy=NEWPRICE`, `sortDirection=0`, `page=1`, `estimatedFees=true`, and `currency=USD`.
 No extra listing pages or listing POST are requested by the adapter.
 The returned grid's sort-direction metadata can differ from the requested
 value; minimum selection uses actual amounts rather than trusting order.
 
-## Real examples
+## Earlier buyer-currency examples
 
 Chad Gray, event `161331875`, The Bellwether, Los Angeles, October 4, 2026:
 
-- Final workflow capture: `2026-10-04T19:15:54.574948+00:00`.
+- Earlier workflow capture: `2026-10-04T19:15:54.574948+00:00`.
 - Two actual listings: `13367389979` (Accessible) and `13367390032`
   (General Admission), both `rawPrice=162.37` in buyer currency CAD.
 - `totalCount=totalListingsCount=2`, `itemsRemaining=0`, `quantity=0`.
@@ -53,7 +70,14 @@ smoke at 19:08 UTC returned CAD 47.70 with quantity zero; inventory had changed.
 
 ## Complete workflow validation
 
-Fresh final run: `output/cancelled_browser_floor_workflow_20261004_validated/`.
+Latest direct-USD run: `output/cancelled_browser_floor_workflow_20261004_usd/`,
+completed at `2026-10-04T19:28:44.230316+00:00`. All 56 event requests were
+page-one GETs with `currency=USD`; 55 returned valid USD prices and one
+explicitly empty inventory. All 58 match rows and links were preserved.
+No FX request was made; the manifest is complete and the process exited 0.
+Chad Gray returned USD 113.97 directly at `2026-10-04T19:27:38.114485+00:00`.
+
+Earlier validated run: `output/cancelled_browser_floor_workflow_20261004_validated/`.
 It used the collected StubHub shortlist and normalized Ticketmaster/TicketWeb
 cancellations, and completed at `2026-10-04T19:17:00.082646+00:00`:
 
@@ -87,7 +111,7 @@ are recorded separately. See [price refresh](price_refresh.md) for the contract.
 
 Sanitized real document extracts for Chad Gray, basketball and empty inventory
 are committed in `tests/fixtures/`; session tokens and unrelated fields are omitted.
-All 124 offline tests, Ruff lint/format checks and source/wheel builds passed.
+All 126 offline tests, Ruff lint/format checks and source/wheel builds passed.
 Playwright/Chromium were installed in the local project environment. Browser
 access can still fail in a different environment; such failures preserve the
 matches and produce unknown prices instead of empty-inventory claims.

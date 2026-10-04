@@ -5,7 +5,7 @@ import logging
 import time
 from decimal import Decimal, InvalidOperation
 from html.parser import HTMLParser
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from urllib.parse import urlencode, urlsplit, urlunsplit
 
 from .http import ResponseError
 from .listing_prices import field, listing_page, listing_quote, listing_url
@@ -42,12 +42,18 @@ class EmbeddedJSON(HTMLParser):
 
 def first_page_url(row):
     parts = urlsplit(listing_url(row))
-    query = dict(parse_qsl(parts.query))
-    query.update(quantity=0, sortBy="NEWPRICE", sortDirection=0, page=1, estimatedFees="true")
+    query = {
+        "quantity": 0,
+        "sortBy": "NEWPRICE",
+        "sortDirection": 0,
+        "page": 1,
+        "estimatedFees": "true",
+        "currency": "USD",
+    }
     return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), ""))
 
 
-def document_grid(html, identity):
+def document_grid(html, identity, expected_currency=None):
     parser = EmbeddedJSON()
     parser.feed(html)
     try:
@@ -81,6 +87,8 @@ def document_grid(html, identity):
             raise ResponseError(f"Event grid has an unexpected listing filter: {key}")
     if "currencyCode" not in app:
         raise ResponseError("Event document requires explicit display currency")
+    if expected_currency is not None and app["currencyCode"] != expected_currency:
+        raise ResponseError(f"Event document did not honor requested currency={expected_currency}")
     return {**grid, "currencyCode": app["currencyCode"]}
 
 
@@ -228,43 +236,6 @@ class BrowserPriceSession:
             self.close()
             raise
 
-    def fetch(self, url):
-        self.start()
-        self.pace()
-        try:
-            result = self.page.evaluate(
-                """async ({url, timeout}) => {
-                    const controller = new AbortController();
-                    const timer = setTimeout(() => controller.abort(), timeout);
-                    try {
-                        return await Promise.race([
-                            (async () => {
-                                const response = await fetch(url, {signal: controller.signal});
-                                return {status: response.status, text: await response.text()};
-                            })(),
-                            new Promise(resolve => setTimeout(
-                                () => resolve({error: 'timeout'}), timeout))
-                        ]);
-                    } finally { clearTimeout(timer); }
-                }""",
-                {"url": url, "timeout": self.config.request_timeout * 1000},
-            )
-            if result.get("status") != 200:
-                raise ResponseError(
-                    f"Browser JSON request failed: {result.get('status', 'timeout')}"
-                )
-            payload = json.loads(result["text"])
-            if (
-                not isinstance(payload, dict)
-                or not payload
-                or payload.get("error")
-                or payload.get("errors")
-            ):
-                raise ResponseError("Browser request did not return a usable JSON object")
-            return payload
-        except (self.browser_error, ValueError) as exc:
-            raise ResponseError(f"Browser JSON request failed: {exc}") from exc
-
     def fetch_document(self, url, raw):
         self.start()
         self.pace()
@@ -312,14 +283,14 @@ def refresh_event_pages(rows, session, output, currencies):
             "listing_count": "",
             "observations": [],
             "requests": [len(requests)],
-            "basis": "Per-ticket event-page display price; fee-estimate flag retained in evidence",
+            "basis": "Per-ticket USD display price; fee-estimate flag retained in evidence",
         }
         raw = output / "raw" / f"event_{identity}_page1.html"
-        record = {"url": url, "method": "GET", "page": 1, "raw_file": str(raw)}
+        record = {"url": url, "method": "GET", "page": 1, "currency": "USD", "raw_file": str(raw)}
         requests.append(record)
         try:
             html = session.fetch_document(url, raw)
-            grid = document_grid(html, identity)
+            grid = document_grid(html, identity, expected_currency="USD")
             check.update(grid_result(grid, identity, currencies))
             check["observations"].append(
                 {

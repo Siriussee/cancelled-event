@@ -22,7 +22,7 @@ flowchart TD
     Events --> Match["Exact date/location + venue/title similarity"]
     Cancelled --> Match
     Match --> Overlap["High-confidence intersection CSV"]
-    Overlap --> Prices["Playwright: SH event page 1 + currency rates"]
+    Overlap --> Prices["Playwright: SH event page 1 in USD"]
     Prices --> Priced["USD price CSV + status + raw evidence"]
     Prices --> Unknown["Blocked or incomplete: price unknown"]
 ```
@@ -49,6 +49,8 @@ prices into a fresh directory. It preserves source snapshots and links. The
 individual `stubhub-find-cancelled-overlap` and `stubhub-fetch-prices` commands
 remain available. The default price source warms an anonymous browser session,
 then reads actual listings embedded in each event's first HTML page. This path
+explicitly requests `currency=USD` and checks that the response uses USD, so
+browser prices need no local currency conversion. The browser path
 has returned real prices for cancelled Chad Gray and an active basketball
 control. See [price refresh](docs/price_refresh.md) for coverage and currency rules.
 
