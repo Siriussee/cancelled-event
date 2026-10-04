@@ -27,6 +27,7 @@ dependencies = []
 
 [project.optional-dependencies]
 dev = ["ruff>=0.5", "build>=1.2"]
+browser = ["playwright>=1.50"]
 
 [project.urls]
 Repository = "https://github.com/praburamWAPKA/stubhub_all_event_scraper"

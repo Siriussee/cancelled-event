@@ -1,118 +1,131 @@
 # Price refresh
 
-`stubhub-fetch-prices` defaults to `--source listings`. It accepts the matcher
-CSV or a table with `SH Event ID`/`StubHub URL`, preserves every row/link, and
-adds `Price (USD)`, status, original floor/currency, listing ID/count, source,
-price basis and UTC observation time. Discovery seeds and raw Explore pages
-are unnecessary for this mode.
+`stubhub-fetch-prices` and `stubhub-cancelled-workflow` default to
+`--source event-page`. They accept matcher CSVs or tables with `SH Event ID` /
+`StubHub URL`, preserve every row and source link, and add USD prices,
+original currency amounts, observation time, listing IDs, counts and scope.
+No discovery seed or Explore snapshot is needed for browser prices.
 
-**Live validation limitation:** on October 4, 2026, the tested environment's
-event-page GET and listing POST requests received HTTP 403. Successful live
-listing responses and numeric floors have not been verified. The adapter's
-price and pagination contracts are tested offline; blocked responses remain
-`request_error`, with blank prices and raw evidence. This is not evidence of
-no inventory. See [path investigation](floor_price_path.md).
-
-## Run after matching
+## Browser setup and workflow
 
 ```bash
-stubhub-find-cancelled-overlap
-stubhub-fetch-prices --output-dir output/prices/new-run
-```
+python -m pip install -e '.[browser]'
+python -m playwright install chromium
 
-Or combine matching and price collection for existing snapshots:
-
-```bash
 stubhub-cancelled-workflow \
   --stubhub-csv output/my-run/events.csv \
   --ticketmaster-csv output/my-run/ticketmaster_cancelled_events.csv \
   --output-dir output/cancelled/new-run
 ```
 
-The workflow creates `intersection.csv`, `prices/enriched.csv`,
-`prices/report.md`, `prices/checks.json`, `prices/location_settings.json`,
-`prices/raw/` and `manifest.json`. The manifest records source hashes, match
-and price stage outcomes and evidence paths. A failed price lookup preserves
-matches and produces `needs_attention` with a nonzero exit code. It never
-recollects or overwrites the source snapshots. Upstream collection remains
-`stubhub-scrape-events` and `ticketmaster-scrape-cancelled-events`.
-
-Both commands require an empty output directory. Inputs stay untouched and
-generated outputs remain ignored by Git. Empty intersections produce a CSV
-with headers and make no price requests.
-
-## Listing floor contract
-
-The adapter posts JSON to each canonical StubHub event URL with
-`ShowAllTickets=true`, `HideDuplicateTickets=false`, `SortBy=PRICE`,
-`SortDirection=0`, `EstimatedFees=true` and explicit page/size. No quantity,
-seat or section filter is applied by the client. Numeric IDs without URLs use
-`https://www.stubhub.com/event/<id>/`. Source URLs remain in the output, and
-URLs must be on StubHub and match the event ID before listing requests run.
-
-Accept an `Items`/`items` list and `TotalCount`/`totalCount` or
-`NumPages`/`numPages` metadata. Follow every declared page, require stable
-counts and unique listing IDs, and verify the final total when provided.
-An explicit wrong event ID/page, conflicting fields, missing pages, repeated
-IDs, or changing totals invalidates the floor. `PRICE_LISTING_MAX_PAGES`
-(default 100) bounds work: reaching it leaves the floor unknown. A minimum
-observed on only part of an event is never promoted to a floor.
-
-Amounts come from positive, finite `RawPrice` with explicit `CurrencyCode`,
-or a displayed `Price` with an unambiguous currency token. A bare `$` needs
-explicit response currency metadata. Do not infer currency from venue country
-or requested URL. If any listing's amount/currency/conversion is unknown,
-the full event floor stays unknown. USD conversion uses fresh
-`GetLocationSettings` rates: `amount × USD rate / source rate`, rounded to cents
-with decimal arithmetic. Listed amounts are per ticket as returned;
-`EstimatedFees=true` requests displayed fee estimates, but inclusion of every
-fee and the checkout total are not independently verified.
-
-Duplicate event rows share one lookup. `hasActiveListings=False` in discovery
-does not skip the lookup. `SH Floor Price` and `Price Source=listing_grid`
-identify the listing result; `SH From Price` stays blank in this mode. All
-requests, bodies, page response paths and observations are retained in
-`checks.json`. The transport saves the final raw response per page even on
-HTTP or JSON failures, so a `.json` evidence file may contain HTML.
-
-## Optional Explore display quotes
+To refresh an existing intersection, run:
 
 ```bash
-stubhub-fetch-prices --source explore \
+stubhub-fetch-prices \
   --input-csv output/my-run/intersection.csv \
-  --events-csv output/my-run/events.csv \
-  --cities-csv data/worldcities.csv \
-  --source-raw-dir output/my-run/raw \
-  --output-dir output/my-run/display-quotes
+  --output-dir output/prices/new-run
 ```
 
-Explore refreshes the lowest source page, then searches up to four pages
-either side. Targets share requests and stop after their first fresh
-observation. Use the same `EXPLORE_SORT_TYPE` and `EXPLORE_PAGE_SIZE` as
-discovery. Raw lookup supports current and old coordinate filenames, with
-coordinates from the seed list. Without raw files, same-named seed cities
-are rejected rather than guessed.
+Use `--browser-executable /absolute/path/to/chrome` for an existing Chromium
+installation. `PRICE_BROWSER_EXECUTABLE` and `PRICE_BROWSER_WAIT_SECONDS`
+(default 8 seconds per warmup page) provide the same settings.
 
-`formattedFromPrice` is a displayed starting price, not a verified listing
-floor. It goes into `SH From Price` with `Price Source=explore`; `SH Floor
-Price` stays blank. Missing quotes and bounded search misses remain unknown.
-This retains the earlier Explore refresh behavior behind an explicit source.
+The workflow writes `intersection.csv`, `prices/enriched.csv`, `prices/report.md`,
+`prices/checks.json`, fresh `prices/location_settings.json`, original HTML in
+`prices/raw/`, and `manifest.json`. The manifest includes input hashes and
+stage results. Inputs remain untouched; both commands require a fresh empty
+output directory. Empty intersections produce headers without starting a browser.
+
+## Event page one contract
+
+A shared ephemeral headless Chromium session visits the homepage and Explore
+page, allowing normal site JavaScript to establish an anonymous session. It
+then navigates to each event with:
+
+```text
+?quantity=0&sortBy=NEWPRICE&sortDirection=0&page=1&estimatedFees=true
+```
+
+Only page one is requested for each distinct event; there is no listing POST,
+scrolling or pagination in the adapter. Numeric IDs without URLs use
+`https://www.stubhub.com/event/<id>/`. URLs must belong to StubHub and match
+the event ID. Requests are serial and paced two seconds apart. The browser
+and its temporary cookies are discarded at the end.
+
+Read `app-context` and `index-data.grid` JSON from the **original HTTP document**,
+not hydrated DOM text or SEO `AggregateOffer.lowPrice`. Validate the event IDs,
+page number, `quantity=0`, absence of seat/section/other explicit filters,
+unique listing IDs and consistent counts. `showRecentlySold` / `isSold` items
+are excluded from active prices. Unknown active listing prices invalidate the
+minimum; HTTP errors and challenge pages never mean zero inventory.
+The site's zero-ID empty-grid sentinel is accepted only inside a correctly
+identified event document with an empty item array and both explicit totals zero.
+
+The site's recommended-ticket grouping can reduce `totalCount` below
+`totalListingsCount`. Keep the original inventory count in `SH Listing Count`,
+the grid count in `SH Grid Listing Count`, and the active page count in
+`SH Listings Observed`. Coverage and price scope are separate:
+
+- All active inventory fits on page one: `priced`, `coverage=complete`, scope
+  `event (all listings on page 1)`.
+- Partial inventory but the exact observed minimum equals `grid.minPrice`:
+  `priced`, `coverage=partial`, scope `event (page 1 matches declared minimum)`.
+  This corroborates the site's declared event minimum with a real listing;
+  it does not claim to have inspected all inventory.
+- Partial inventory without that agreement: `page_priced`, scope `page 1 only`.
+  `SH Floor Price` is blank; `SH Page Min Price` and `Price (USD)` contain only
+  the observed page minimum. This is an accepted first-page result, exit code 0.
+
+`SH Page Min Price` is retained for every successful event-page quote.
+`Price Source=event_page_grid` distinguishes this source. A contradictory
+minimum in a complete grid is a validation error, rather than a guessed floor.
+
+## Currency, precision and fees
+
+Use the positive finite `rawPrice` with `buyerCurrencyCode` or explicit page
+`currencyCode`. `listingCurrencyCode` identifies the seller currency and must
+not be applied to `rawPrice`. For example, the live Chad Gray document has
+`rawPrice=162.37`, `buyerCurrencyCode=CAD`, `listingCurrencyCode=USD`, and a
+rounded UI `price="C$162"`. The correct native floor is **CAD 162.37**.
+
+Convert with fresh browser `GetLocationSettings` rates:
+`amount × USD rate / source rate`, using decimal arithmetic and rounding only
+the final USD amount to cents. Do not infer currency from venue or hostname.
+`estimatedFees` and the site's fee disclosure are retained in `checks.json`.
+Amounts are per ticket as returned; final checkout totals are not verified.
+
+A real Chad Gray capture on October 4, 2026 returned two actual listings at
+CAD 162.37, equal to the grid minimum, and USD 113.97 after conversion.
+See [path investigation](floor_price_path.md) for live evidence and alternatives.
+
+## Other sources
+
+`--source listings` retains the older native JSON POST adapter. It requests
+`ShowAllTickets=true`, `HideDuplicateTickets=false`, `SortBy=PRICE`,
+`SortDirection=0`, `EstimatedFees=true`, and explicit page/size. This legacy
+contract remains offline-tested but received HTTP 403 in the live environment;
+it is not the recommended working path. It requires every declared page,
+stable counts and unique IDs before publishing a floor. `PRICE_LISTING_MAX_PAGES`
+(default 100) limits work; truncation leaves prices unknown. Raw failure bodies
+are retained even when the `.json` file actually contains HTML.
+
+`--source explore` refreshes the displayed `formattedFromPrice` using discovery
+seed/page lookup and a bounded search (default four pages either side). Set
+`--events-csv`, `--cities-csv`, and optionally `--source-raw-dir` to the original
+discovery artifacts. Use matching Explore sort/page-size settings. These are
+display quotes: `SH From Price` is populated and `SH Floor Price` stays blank.
 
 | Status | Meaning |
 | --- | --- |
-| `priced` | Complete listing minimum, or optional Explore quote, converted to USD; inspect `Price Source`. |
-| `no_listings` | Listing response explicitly declares zero listings. Price is blank. |
-| `incomplete` | Listing page limit reached. Floor is unknown. |
-| `request_error` | Transport, schema or pagination validation failed. Inventory is unknown. |
-| `fx_error` | A listing/quote cannot be converted with fresh rates. |
-| `ambiguous_currency` / `invalid_price` | A price cannot safely be interpreted. |
-| `no_quote` | Explore found the event but omitted/emptied its price field. |
-| `not_found` | Explore did not find the event in the successfully queried bounded range. |
-| `source_missing` | Explore source seed/page could not be recovered. |
+| `priced` | Confirmed/corroborated event-page floor, complete POST floor, or Explore quote; inspect source and scope. |
+| `page_priced` | Observed page-one minimum only; global floor is blank. |
+| `no_listings` | Explicit zero inventory, with blank price. |
+| `incomplete` | No active page price or native POST page limit reached. |
+| `request_error` | Transport, challenge, schema, identity or count validation failed. |
+| `fx_error` | Fresh rates cannot convert a quote to USD. |
+| `ambiguous_currency` / `invalid_price` | An active listing cannot safely be interpreted. |
+| `no_quote` / `not_found` / `source_missing` | Explore quote absent, bounded lookup missed, or discovery seed unavailable. |
 
-Requests share temporary anonymous cookies and run serially two seconds
-apart, including retries. Cookies are removed when the run ends. Error and
-incomplete statuses produce a nonzero exit; valid `no_listings`, `no_quote`
-and `not_found` results remain blank. Website endpoints can change without
-notice, and the listing-page responses are observations over a time interval,
-not an atomic inventory snapshot.
+Errors and incomplete results preserve matches and produce `needs_attention`
+with a nonzero workflow exit. Successful observations can change between
+requests, and a working browser session does not guarantee future access.

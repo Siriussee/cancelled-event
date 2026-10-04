@@ -5,7 +5,8 @@ Ticketmaster cancellations, match the two datasets and fetch listing floor price
 This is a discovery and record-linkage pipeline: it cannot guarantee every event or confirm live ticket
 inventory. The bundled seed list currently covers the US and Canada.
 
-Python 3.11+ and `curl` are required. Runtime Python dependencies: none.
+Python 3.11+ and `curl` are required. Browser price collection also requires
+the optional Playwright dependency and Chromium; the other commands use the standard library.
 
 ## Flow
 
@@ -21,7 +22,7 @@ flowchart TD
     Events --> Match["Exact date/location + venue/title similarity"]
     Cancelled --> Match
     Match --> Overlap["High-confidence intersection CSV"]
-    Overlap --> Prices["SH event listing pages + currency rates"]
+    Overlap --> Prices["Playwright: SH event page 1 + currency rates"]
     Prices --> Priced["USD price CSV + status + raw evidence"]
     Prices --> Unknown["Blocked or incomplete: price unknown"]
 ```
@@ -33,7 +34,8 @@ From a checkout of this repository:
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install -e .
+python -m pip install -e '.[browser]'
+python -m playwright install chromium
 
 stubhub-scrape-events
 stubhub-fetch-venues
@@ -45,8 +47,10 @@ stubhub-cancelled-workflow --output-dir output/cancelled/new-run
 The workflow uses the two collected CSVs, then matches cancellations and fetches
 prices into a fresh directory. It preserves source snapshots and links. The
 individual `stubhub-find-cancelled-overlap` and `stubhub-fetch-prices` commands
-remain available. Listing requests currently receive HTTP 403 in the tested
-environment; live numeric floors are unverified. See [price refresh](docs/price_refresh.md).
+remain available. The default price source warms an anonymous browser session,
+then reads actual listings embedded in each event's first HTML page. This path
+has returned real prices for cancelled Chad Gray and an active basketball
+control. See [price refresh](docs/price_refresh.md) for coverage and currency rules.
 
 Optional city filtering:
 
@@ -97,7 +101,9 @@ Ticketmaster requests are serial and default to a two-second interval.
 Price requests also run serially at a two-second interval. Use a fresh price
 output directory each run. Blank prices mean unknown. An explicit empty listing
 grid is marked `no_listings`; HTTP errors never establish zero inventory. The
-optional `--source explore` uses displayed from-prices rather than listing floors.
+default `--source event-page` reads one page per event. A minimum that cannot be
+confirmed against the event minimum is marked `page_priced` with page-only scope.
+The optional `--source explore` uses displayed from-prices rather than listing floors.
 
 ## Structure and development
 

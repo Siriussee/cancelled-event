@@ -22,8 +22,8 @@ stubhub-cancelled-workflow \
 ```
 
 This uses the same matcher and keeps every match pair/link in the priced CSV.
-See [price refresh](price_refresh.md) for complete-pagination requirements and
-the current HTTP 403 limitation.
+The default price source uses Playwright and fetches only event page one.
+See [price refresh](price_refresh.md) for browser setup and minimum-price scope rules.
 
 After accent/punctuation normalization, require venue similarity ≥ 0.86 and
 title similarity ≥ 0.80. Whole-phrase title containment also qualifies when the
