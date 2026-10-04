@@ -10,8 +10,8 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from stubhub_all_event_scraper import http, runtime
-from stubhub_all_event_scraper.config import ScraperConfig, env_bool
+from cancelled_event import http, runtime
+from cancelled_event.config import ScraperConfig, env_bool
 
 
 class RuntimeTests(unittest.TestCase):

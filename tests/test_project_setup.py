@@ -24,19 +24,11 @@ class ProjectSetupTests(unittest.TestCase):
         project = metadata["project"]
         scripts = project["scripts"]
 
-        self.assertEqual(project["name"], "stubhub-all-event-scraper")
+        self.assertEqual(project["name"], "cancelled-event")
         self.assertIn(">=3.11", project["requires-python"])
         self.assertEqual(
             set(scripts),
-            {
-                "stubhub-scrape-events",
-                "stubhub-fetch-venues",
-                "stubhub-filter-cities",
-                "ticketmaster-scrape-cancelled-events",
-                "stubhub-find-cancelled-overlap",
-                "stubhub-fetch-prices",
-                "stubhub-cancelled-workflow",
-            },
+            {"cancelled-event"},
         )
 
         for entry_point in scripts.values():
@@ -48,12 +40,12 @@ class ProjectSetupTests(unittest.TestCase):
         if not (PROJECT_ROOT / ".git").exists():
             self.skipTest("Git-specific check requires a checkout")
         generated_paths = [
-            "src/stubhub_all_event_scraper/__pycache__/event_scraper.cpython-314.pyc",
+            "src/cancelled_event/sources/__pycache__/stubhub_events.cpython-314.pyc",
             ".venv/bin/python",
             ".env",
             ".env.ticketmaster.local",
             "dist/package.whl",
-            "src/stubhub_all_event_scraper.egg-info/PKG-INFO",
+            "src/cancelled_event.egg-info/PKG-INFO",
             "output/events.csv",
             "log/progress_log_event.log",
             "log/scraper.log",
@@ -84,13 +76,13 @@ class ProjectSetupTests(unittest.TestCase):
                     sys.executable,
                     "-c",
                     (
-                        "import stubhub_all_event_scraper.event_scraper; "
-                        "import stubhub_all_event_scraper.venue_map_fetcher; "
-                        "import stubhub_all_event_scraper.ticketmaster_cancelled_event_scraper; "
-                        "import stubhub_all_event_scraper.cancelled_event_intersection; "
-                        "import stubhub_all_event_scraper.filter_worldcities_by_geonames_feature; "
-                        "import stubhub_all_event_scraper.price_fetcher; "
-                        "import stubhub_all_event_scraper.cancelled_workflow"
+                        "import cancelled_event.sources.stubhub_events; "
+                        "import cancelled_event.sources.venue_maps; "
+                        "import cancelled_event.sources.ticketmaster_cancellations; "
+                        "import cancelled_event.matching; "
+                        "import cancelled_event.sources.city_seeds; "
+                        "import cancelled_event.pricing.refresh; "
+                        "import cancelled_event.workflow"
                     ),
                 ],
                 cwd=tmpdir,

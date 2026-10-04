@@ -1,6 +1,6 @@
 # Price refresh
 
-`stubhub-fetch-prices` and `stubhub-cancelled-workflow` default to
+`cancelled-event prices` and `cancelled-event run` default to
 `--source event-page`. They accept matcher CSVs or tables with `SH Event ID` /
 `StubHub URL`, preserve every row and source link, and add USD prices,
 original currency amounts, observation time, listing IDs, counts and scope.
@@ -14,7 +14,7 @@ they do not fetch exchange rates or convert the amount locally.
 python -m pip install -e '.[browser]'
 python -m playwright install chromium
 
-stubhub-cancelled-workflow \
+cancelled-event run \
   --stubhub-csv output/my-run/events.csv \
   --ticketmaster-csv output/my-run/ticketmaster_cancelled_events.csv \
   --output-dir output/cancelled/new-run
@@ -23,8 +23,8 @@ stubhub-cancelled-workflow \
 To refresh an existing intersection, run:
 
 ```bash
-stubhub-fetch-prices \
-  --input-csv output/my-run/intersection.csv \
+cancelled-event prices \
+  --input-csv output/my-run/matches.csv \
   --output-dir output/prices/new-run
 ```
 
@@ -32,7 +32,7 @@ Use `--browser-executable /absolute/path/to/chrome` for an existing Chromium
 installation. `PRICE_BROWSER_EXECUTABLE` and `PRICE_BROWSER_WAIT_SECONDS`
 (default 8 seconds per warmup page) provide the same settings.
 
-The workflow writes `intersection.csv`, `prices/enriched.csv`, `prices/report.md`,
+The workflow writes `matches.csv`, `prices/enriched.csv`, `prices/report.md`,
 `prices/checks.json`, original HTML in
 `prices/raw/`, and `manifest.json`. The manifest includes input hashes and
 stage results. Inputs remain untouched; both commands require a fresh empty
@@ -104,7 +104,7 @@ Amounts are per ticket as returned; final checkout totals are not verified.
 
 A real Chad Gray capture at 19:24 UTC on October 4, 2026 returned two actual
 USD 113.97 listings, equal to the grid minimum, without an FX request.
-See [path investigation](floor_price_path.md) for live evidence and alternatives.
+See [path investigation](price_sources.md) for live evidence and alternatives.
 
 ## Other sources
 

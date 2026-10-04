@@ -15,7 +15,7 @@ The flow is in [README](../README.md); contracts are in [components](components.
 | Runtime dependencies declared but unused | Standard-library runtime; remove requirements.txt. Keep Ruff and build as development tools. |
 | Duplicated configuration and retry logic | Shared config/HTTP/runtime helpers; environment read on construction, finite values validated. |
 | .env copy instructions suggested automatic loading | Document explicit shell export; remove unsupported rate-limit, debug and SSL switches. |
-| Import-time logging / missing command help | Configure logging only on execution; all five entry points support --help. |
+| Import-time logging / missing command help | Configure logging only on execution; all subcommands support --help. |
 | Failures swallowed and reported as success | StubHub workers propagate failures to a nonzero command result; preserve valid checkpoints. |
 | Resume could duplicate a committed page | Recover written IDs; synchronize CSV/checkpoint writes; retain explicit completed-city markers. |
 | Coordinate-derived names lost signs or Unicode distinctions | Slug plus a digest of full city/country/coordinates. |
@@ -27,6 +27,19 @@ The flow is in [README](../README.md); contracts are in [components](components.
 | Docs described retired GraphQL endpoints and old run counts | Replace with concise current contracts; official Feed probing is documented separately from ingestion. |
 | Temporary browser probe / incompatible unused city table | Remove both; preserve the existing US/Canada seed input. |
 
+## Package and command structure
+
+Business code lives in `src/cancelled_event/`. The `cancelled-event` command and
+`python -m cancelled_event` share one dispatcher. Source adapters are in
+`sources/`, price adapters and shared parsing are in `pricing/`, and the official
+API check is an installed component in `diagnostics/`. Price adapters depend on
+shared grid/currency parsing rather than on the price orchestrator. Generic CSV,
+JSON and timestamp helpers live in `runtime.py`.
+
+New workflow runs publish `matches.csv`; standalone matching defaults to
+`output/matches.csv`. Existing environment variable names and CSV columns remain
+supported. Existing local artifacts are retained at their original paths.
+
 ## Git policy
 
 Track source, offline tests, concise docs, CI, package metadata, the MIT license,
@@ -35,12 +48,14 @@ Track source, offline tests, concise docs, CI, package metadata, the MIT license
 environments and build artifacts. Existing local scrape results are retained.
 No secrets or scraped responses are staged; no history rewrite is required.
 
-The original remote is read-only for the active account. Keep it as `upstream`
-and push `main` to the account's writable fork as `origin`.
+Cancelled Event is maintained independently at
+`https://github.com/Siriussee/cancelled-event`. Keep that repository as `origin`;
+there is no `upstream` remote. Preserve the original commit history and MIT
+copyright attribution.
 
 ## Validation and remaining limits
 
-79 offline regression tests cover transport/retry errors, crash resume, concurrent
+Offline regression tests cover transport/retry errors, crash resume, concurrent
 writes, venue cache collisions, pagination completeness, conservative matching,
 key redaction, packaging entry points and Git ignores. Ruff checks formatting
 and lint; release artifacts are built and their CLI help is checked outside the

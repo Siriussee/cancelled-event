@@ -1,7 +1,8 @@
-# StubHub All Event Scraper
+# Cancelled Event
 
-Seven CLI tools collect location-based StubHub events, enrich venue maps, collect
-Ticketmaster cancellations, match the two datasets and fetch listing floor prices.
+Cancelled Event collects Ticketmaster cancellations and StubHub events, matches
+the two snapshots and verifies current StubHub listing prices in USD. Optional
+commands filter city seeds, enrich venue maps and check official API access.
 This is a discovery and record-linkage pipeline: it cannot guarantee every event or confirm live ticket
 inventory. The bundled seed list currently covers the US and Canada.
 
@@ -21,7 +22,7 @@ flowchart TD
     Ticketmaster["Ticketmaster Discover: country/date/category"] --> Cancelled["Cancelled-event CSV + raw pages"]
     Events --> Match["Exact date/location + venue/title similarity"]
     Cancelled --> Match
-    Match --> Overlap["High-confidence intersection CSV"]
+    Match --> Overlap["High-confidence matched events CSV"]
     Overlap --> Prices["Playwright: SH event page 1 in USD"]
     Prices --> Priced["USD price CSV + status + raw evidence"]
     Prices --> Unknown["Blocked or incomplete: price unknown"]
@@ -37,16 +38,16 @@ source .venv/bin/activate
 python -m pip install -e '.[browser]'
 python -m playwright install chromium
 
-stubhub-scrape-events
-stubhub-fetch-venues
+cancelled-event collect stubhub
+cancelled-event venues
 
-ticketmaster-scrape-cancelled-events
-stubhub-cancelled-workflow --output-dir output/cancelled/new-run
+cancelled-event collect ticketmaster
+cancelled-event run --output-dir output/cancelled/new-run
 ```
 
 The workflow uses the two collected CSVs, then matches cancellations and fetches
 prices into a fresh directory. It preserves source snapshots and links. The
-individual `stubhub-find-cancelled-overlap` and `stubhub-fetch-prices` commands
+individual `cancelled-event match` and `cancelled-event prices` commands
 remain available. The default price source warms an anonymous browser session,
 then reads actual listings embedded in each event's first HTML page. This path
 explicitly requests `currency=USD` and checks that the response uses USD, so
@@ -57,12 +58,13 @@ control. See [price refresh](docs/price_refresh.md) for coverage and currency ru
 Optional city filtering:
 
 ```bash
-stubhub-filter-cities
-stubhub-scrape-events --input-csv data/worldcities.filtered.csv
+cancelled-event filter-cities
+cancelled-event collect stubhub --input-csv data/worldcities.filtered.csv
 ```
 
-All seven commands support `--help`. Run them from the checkout root, or override
-the default relative paths. Installing the Python package does not install the
+Run `cancelled-event --help` for the command list. Every subcommand supports
+`--help`; `python -m cancelled_event` provides the same interface. Run commands
+from the checkout root, or override the default relative paths. Installing the Python package does not install the
 city dataset.
 
 ## Configuration and outputs
@@ -87,9 +89,9 @@ See [.env.example](.env.example) for the supported settings. Defaults:
 | Resume checkpoints | `log/progress_log_event.log` |
 | Venue maps | `output/venues/<eventId>_<categoryId>_venue.json` |
 | Ticketmaster cancellations / raw pages | `output/ticketmaster_cancelled_events.csv` / `output/ticketmaster_cancelled_events/` |
-| Matched events | `output/stubhub_ticketmaster_cancelled_intersection.csv` |
+| Matched events | `output/matches.csv` |
 | Refreshed prices / evidence | `output/prices/enriched.csv` / `output/prices/checks.json` and `raw/` |
-| Combined match/price workflow | `output/cancelled-workflow/intersection.csv`, `prices/`, `manifest.json` |
+| Combined match/price workflow | `output/cancelled-workflow/matches.csv`, `prices/`, `manifest.json` |
 
 StubHub resumes the same crawl. Use fresh event and checkpoint paths for a new
 snapshot; see [components](docs/components.md). City pagination stops at 100
@@ -110,12 +112,19 @@ The optional `--source explore` uses displayed from-prices rather than listing f
 ## Structure and development
 
 ```text
-src/stubhub_all_event_scraper/   Seven commands + config, HTTP and runtime helpers
-scripts/                       Optional official Ticketmaster API access check
-tests/                        Offline regression tests
-data/                         Versioned city seeds; generated filters ignored
-docs/                         Concise component, matching and audit notes
-log/, output/                 Ignored local run artifacts
+src/cancelled_event/
+  cli.py, __main__.py          Unified command and python -m entry point
+  matching.py, workflow.py     Matching and combined match/price workflow
+  sources/                    StubHub, Ticketmaster, venue maps and city seeds
+  pricing/                    Price orchestration, adapters and shared parsing
+  diagnostics/                Official Ticketmaster API access check
+  config.py, http.py, runtime.py
+                              Validated settings, transport and publication
+tests/                       Offline regression tests and captured fixtures
+data/                        Versioned city seeds; generated filters ignored
+docs/                        Component, matching and price coverage notes
+.github/workflows/           CI checks
+log/, output/                Ignored local run artifacts
 ```
 
 ```bash
@@ -128,10 +137,12 @@ python -m build
 
 Development tools are Ruff and the package builder; tests use `unittest`.
 CI runs checks on Python 3.11, 3.13 and 3.14. See
-[component contracts](docs/components.md), [matching](docs/cancelled_event_intersection.md),
-[Ticketmaster collection](docs/ticketmaster_cancelled_events.md),
+[component contracts](docs/components.md), [matching](docs/matching.md),
+[Ticketmaster collection](docs/ticketmaster_cancellations.md),
 [price refresh](docs/price_refresh.md),
-[optional API verification](docs/ticketmaster_api_verification.md) and
+[optional API verification](docs/ticketmaster_api.md) and
 [review notes](docs/repository_review.md).
 
-MIT license; see [LICENSE](LICENSE).
+Derived from [Praburam’s StubHub All Event Scraper](https://github.com/praburamWAPKA/stubhub_all_event_scraper).
+Maintained as an independent project. Original copyright and MIT terms are
+preserved; see [LICENSE](LICENSE).

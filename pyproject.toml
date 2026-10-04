@@ -3,15 +3,15 @@ requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "stubhub-all-event-scraper"
+name = "cancelled-event"
 version = "0.1.0"
-description = "StubHub event discovery, venue enrichment and Ticketmaster cancellation matching."
+description = "Cancelled-event discovery, cross-platform matching and StubHub price verification."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
 license-files = ["LICENSE"]
-authors = [{ name = "StubHub All Event Scraper contributors" }]
-keywords = ["stubhub", "scraper", "events", "venues"]
+authors = [{ name = "Cancelled Event contributors" }]
+keywords = ["cancelled-events", "ticketmaster", "stubhub", "matching", "prices"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Console",
@@ -30,16 +30,10 @@ dev = ["ruff>=0.5", "build>=1.2"]
 browser = ["playwright>=1.50"]
 
 [project.urls]
-Repository = "https://github.com/praburamWAPKA/stubhub_all_event_scraper"
+Repository = "https://github.com/Siriussee/cancelled-event"
 
 [project.scripts]
-stubhub-scrape-events = "stubhub_all_event_scraper.event_scraper:main"
-stubhub-fetch-venues = "stubhub_all_event_scraper.venue_map_fetcher:main"
-stubhub-filter-cities = "stubhub_all_event_scraper.filter_worldcities_by_geonames_feature:main"
-ticketmaster-scrape-cancelled-events = "stubhub_all_event_scraper.ticketmaster_cancelled_event_scraper:main"
-stubhub-find-cancelled-overlap = "stubhub_all_event_scraper.cancelled_event_intersection:main"
-stubhub-fetch-prices = "stubhub_all_event_scraper.price_fetcher:main"
-stubhub-cancelled-workflow = "stubhub_all_event_scraper.cancelled_workflow:main"
+cancelled-event = "cancelled_event.cli:main"
 
 [tool.setuptools]
 package-dir = { "" = "src" }
