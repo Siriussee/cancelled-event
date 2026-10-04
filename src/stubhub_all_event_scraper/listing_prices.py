@@ -93,7 +93,9 @@ def listing_page(payload, identity, page, requested_size):
 
 
 def listing_quote(item, payload, currencies):
-    code, response_code = field(item, "CurrencyCode"), field(payload, "CurrencyCode")
+    # rawPrice is in the buyer's display currency, not listingCurrencyCode (seller currency).
+    code = field(item, "BuyerCurrencyCode") or field(item, "CurrencyCode")
+    response_code = field(payload, "CurrencyCode")
     if code and response_code and code != response_code:
         raise ValueError("ambiguous_currency")
     code = code or response_code
@@ -125,6 +127,7 @@ def listing_quote(item, payload, currencies):
     else:
         raise ValueError("invalid_price")
     return {
+        "amount": str(amount),
         "usd": str(to_usd(amount, code, currencies)),
         "usd_unrounded": str(usd_amount(amount, code, currencies)),
         "currency": code,

@@ -73,7 +73,11 @@ def main(argv=None):
     parser.add_argument("--stubhub-csv", default=intersection.stubhub_csv)
     parser.add_argument("--ticketmaster-csv", default=intersection.ticketmaster_csv)
     parser.add_argument("--output-dir", default="output/cancelled-workflow")
-    parser.add_argument("--source", choices=("listings", "explore"), default=prices.source)
+    parser.add_argument(
+        "--source", choices=("event-page", "listings", "explore"), default=prices.source
+    )
+    parser.add_argument("--browser-executable", default=prices.browser_executable)
+    parser.add_argument("--browser-wait-seconds", type=float, default=prices.browser_wait_seconds)
     parser.add_argument("--cities-csv", default=prices.cities_csv)
     parser.add_argument("--source-raw-dir", default=prices.source_raw_dir)
     parser.add_argument("--request-interval", type=float, default=prices.request_interval)
@@ -92,6 +96,8 @@ def main(argv=None):
             request_interval=args.request_interval,
             listing_page_size=args.listing_page_size,
             listing_max_pages=args.listing_max_pages,
+            browser_executable=args.browser_executable,
+            browser_wait_seconds=args.browser_wait_seconds,
         )
         configure_logging(prices.log_file, prices.log_level)
         return run(intersection, prices, args.output_dir)

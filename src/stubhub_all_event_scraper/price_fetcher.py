@@ -33,6 +33,12 @@ PRICE_FIELDS = [
     "SH Listing ID",
     "SH Listing Count",
     "Price Basis",
+    "Price Scope",
+    "SH Page Min Price",
+    "SH Listings Observed",
+    "SH Listing Coverage",
+    "SH Price Quantity",
+    "SH Grid Listing Count",
 ]
 DEFAULT_SYMBOLS = {
     "USD": {"US$", "USD"},
@@ -56,9 +62,11 @@ class PriceConfig(RequestConfig):
     log_file: str = env_field("PRICE_LOG_FILE", "log/prices.log")
     explore_sort_type: str = env_field("EXPLORE_SORT_TYPE", "Distance")
     explore_page_size: int = env_field("EXPLORE_PAGE_SIZE", 100, int)
-    source: str = env_field("PRICE_SOURCE", "listings")
+    source: str = env_field("PRICE_SOURCE", "event-page")
     listing_page_size: int = env_field("PRICE_LISTING_PAGE_SIZE", 50, int)
     listing_max_pages: int = env_field("PRICE_LISTING_MAX_PAGES", 100, int)
+    browser_executable: str = env_field("PRICE_BROWSER_EXECUTABLE", "")
+    browser_wait_seconds: float = env_field("PRICE_BROWSER_WAIT_SECONDS", 8.0, float)
 
     def __post_init__(self):
         super().__post_init__()
@@ -74,8 +82,9 @@ class PriceConfig(RequestConfig):
         validate_number("explore_page_size", self.explore_page_size, 1)
         validate_number("listing_page_size", self.listing_page_size, 1)
         validate_number("listing_max_pages", self.listing_max_pages, 1)
-        if self.source not in {"listings", "explore"}:
-            raise ValueError("Price source must be listings or explore")
+        validate_number("browser_wait_seconds", self.browser_wait_seconds)
+        if self.source not in {"listings", "explore", "event-page"}:
+            raise ValueError("Price source must be event-page, listings or explore")
 
 
 def utc_now():
@@ -269,6 +278,9 @@ class PriceSession:
             url, self.config, cookie_file=self.cookie_file, before_request=self.pace, **kwargs
         )
 
+    def close(self):
+        self.cookie_file.unlink(missing_ok=True)
+
 
 def save_json(path, payload):
     with atomic_output(path) as handle:
@@ -372,13 +384,24 @@ def enriched_rows(rows, checks):
             ),
             "SH Floor Price": (
                 checks[event_id(row)]["quote"]
-                if checks[event_id(row)].get("source") == "listing_grid"
+                if checks[event_id(row)].get("source") in {"listing_grid", "event_page_grid"}
+                and checks[event_id(row)]["status"] == "priced"
                 else ""
             ),
             "Price Source": checks[event_id(row)].get("source", "explore"),
             "SH Listing ID": checks[event_id(row)].get("listing_id", ""),
             "SH Listing Count": checks[event_id(row)].get("listing_count", ""),
             "Price Basis": checks[event_id(row)].get("basis", "Explore displayed from-price"),
+            "Price Scope": checks[event_id(row)].get("scope", ""),
+            "SH Page Min Price": (
+                checks[event_id(row)]["quote"]
+                if checks[event_id(row)].get("source") == "event_page_grid"
+                else ""
+            ),
+            "SH Listings Observed": checks[event_id(row)].get("observed_count", ""),
+            "SH Listing Coverage": checks[event_id(row)].get("coverage", ""),
+            "SH Price Quantity": checks[event_id(row)].get("quantity", ""),
+            "SH Grid Listing Count": checks[event_id(row)].get("grid_count", ""),
         }
         for row in rows
     ]
@@ -389,15 +412,18 @@ def markdown_report(rows, checks):
     lines = [
         "# StubHub price refresh",
         "",
-        "Listing floors require a complete event listing response across all pages. "
+        "Event-page prices use page one only. A floor requires complete coverage or "
+        "agreement with the page's event minimum; page_priced is only the observed page minimum. "
+        "Listing POST floors require complete pagination. "
         "Explore quotes are a separate optional source. Prices are per ticket as returned; "
         "fees and checkout totals are not independently verified. Blank amounts remain "
         "unknown; only an explicit empty listing result is marked no_listings.",
         "",
         f"Unique events: {len(checks)}. Statuses: {dict(counts)}.",
         "",
-        "| Name | Date | Location | StubHub URL | Ticketmaster URL | Price (USD) | Price Status |",
-        "| --- | --- | --- | --- | --- | --- | --- |",
+        "| Name | Date | Location | StubHub URL | Ticketmaster URL | Price (USD) | "
+        "Price Status | Price Scope |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
 
     def escape(value):
@@ -429,6 +455,7 @@ def markdown_report(rows, checks):
             ),
             row["Price (USD)"] or "Unknown",
             row["Price Status"],
+            row["Price Scope"],
         ]
         lines.append("| " + " | ".join(map(escape, values)) + " |")
     return "\n".join(lines) + "\n"
@@ -443,7 +470,12 @@ def run(config):
     if output.exists() and any(output.iterdir()):
         raise ValueError("Price output directory must be empty; use a fresh run directory")
     output.mkdir(parents=True, exist_ok=True)
-    session = PriceSession(config, output)
+    if config.source == "event-page":
+        from .event_page_prices import BrowserPriceSession
+
+        session = BrowserPriceSession(config, output)
+    else:
+        session = PriceSession(config, output)
     report = {
         "started_at": utc_now(),
         "inputs": {},
@@ -455,6 +487,8 @@ def run(config):
         "source": config.source,
         "listing_page_size": config.listing_page_size,
         "listing_max_pages": config.listing_max_pages,
+        "browser_wait_seconds": config.browser_wait_seconds,
+        "browser_executable": config.browser_executable,
     }
     inputs = [("matches", config.input_csv)]
     if config.source == "explore":
@@ -481,7 +515,12 @@ def run(config):
             except ResponseError as exc:
                 report["settings_error"] = str(exc)
                 logger.warning("USD conversions may be unavailable: %s", exc)
-        if config.source == "listings":
+        if config.source == "event-page":
+            from .event_page_prices import refresh_event_pages
+
+            checks, requests = refresh_event_pages(rows, session, output, currencies)
+            report["browser_warmup"] = session.warmup
+        elif config.source == "listings":
             from .listing_prices import refresh_listings
 
             checks, requests = refresh_listings(rows, config, session, output, currencies)
@@ -513,7 +552,7 @@ def run(config):
         }
         return int(bool(errors & report["status_counts"].keys()) or "settings_error" in report)
     finally:
-        session.cookie_file.unlink(missing_ok=True)
+        session.close()
 
 
 def main(argv=None):
@@ -526,11 +565,15 @@ def main(argv=None):
         "source_raw_dir",
         "output_dir",
         "log_file",
+        "browser_executable",
     ):
         parser.add_argument("--" + option.replace("_", "-"), default=getattr(config, option))
     parser.add_argument("--page-radius", type=int, default=config.page_radius)
     parser.add_argument("--request-interval", type=float, default=config.request_interval)
-    parser.add_argument("--source", choices=("listings", "explore"), default=config.source)
+    parser.add_argument(
+        "--source", choices=("event-page", "listings", "explore"), default=config.source
+    )
+    parser.add_argument("--browser-wait-seconds", type=float, default=config.browser_wait_seconds)
     parser.add_argument("--listing-page-size", type=int, default=config.listing_page_size)
     parser.add_argument("--listing-max-pages", type=int, default=config.listing_max_pages)
     args = parser.parse_args(argv)
