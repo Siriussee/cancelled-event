@@ -1,7 +1,7 @@
 # StubHub All Event Scraper
 
-Six CLI tools collect location-based StubHub events, enrich venue maps, collect
-Ticketmaster cancellations, match the two datasets and refresh displayed prices.
+Seven CLI tools collect location-based StubHub events, enrich venue maps, collect
+Ticketmaster cancellations, match the two datasets and fetch listing floor prices.
 This is a discovery and record-linkage pipeline: it cannot guarantee every event or confirm live ticket
 inventory. The bundled seed list currently covers the US and Canada.
 
@@ -21,9 +21,9 @@ flowchart TD
     Events --> Match["Exact date/location + venue/title similarity"]
     Cancelled --> Match
     Match --> Overlap["High-confidence intersection CSV"]
-    Overlap --> Prices["Refresh SH Explore from-prices + currency rates"]
-    Events --> Prices
+    Overlap --> Prices["SH event listing pages + currency rates"]
     Prices --> Priced["USD price CSV + status + raw evidence"]
+    Prices --> Unknown["Blocked or incomplete: price unknown"]
 ```
 
 ## Install and run
@@ -39,9 +39,14 @@ stubhub-scrape-events
 stubhub-fetch-venues
 
 ticketmaster-scrape-cancelled-events
-stubhub-find-cancelled-overlap
-stubhub-fetch-prices --output-dir output/prices/new-run
+stubhub-cancelled-workflow --output-dir output/cancelled/new-run
 ```
+
+The workflow uses the two collected CSVs, then matches cancellations and fetches
+prices into a fresh directory. It preserves source snapshots and links. The
+individual `stubhub-find-cancelled-overlap` and `stubhub-fetch-prices` commands
+remain available. Listing requests currently receive HTTP 403 in the tested
+environment; live numeric floors are unverified. See [price refresh](docs/price_refresh.md).
 
 Optional city filtering:
 
@@ -50,7 +55,7 @@ stubhub-filter-cities
 stubhub-scrape-events --input-csv data/worldcities.filtered.csv
 ```
 
-All six commands support `--help`. Run them from the checkout root, or override
+All seven commands support `--help`. Run them from the checkout root, or override
 the default relative paths. Installing the Python package does not install the
 city dataset.
 
@@ -78,6 +83,7 @@ See [.env.example](.env.example) for the supported settings. Defaults:
 | Ticketmaster cancellations / raw pages | `output/ticketmaster_cancelled_events.csv` / `output/ticketmaster_cancelled_events/` |
 | Matched events | `output/stubhub_ticketmaster_cancelled_intersection.csv` |
 | Refreshed prices / evidence | `output/prices/enriched.csv` / `output/prices/checks.json` and `raw/` |
+| Combined match/price workflow | `output/cancelled-workflow/intersection.csv`, `prices/`, `manifest.json` |
 
 StubHub resumes the same crawl. Use fresh event and checkpoint paths for a new
 snapshot; see [components](docs/components.md). City pagination stops at 100
@@ -89,13 +95,14 @@ Only run one process per output/checkpoint set. `WAIT_SECONDS` paces each StubHu
 worker, not the entire pool; concurrency multiplies the overall request rate.
 Ticketmaster requests are serial and default to a two-second interval.
 Price requests also run serially at a two-second interval. Use a fresh price
-output directory each run. Blank prices mean unknown, including when Explore
-omits its price field; see [price refresh](docs/price_refresh.md).
+output directory each run. Blank prices mean unknown. An explicit empty listing
+grid is marked `no_listings`; HTTP errors never establish zero inventory. The
+optional `--source explore` uses displayed from-prices rather than listing floors.
 
 ## Structure and development
 
 ```text
-src/stubhub_all_event_scraper/   Six commands + config, HTTP and runtime helpers
+src/stubhub_all_event_scraper/   Seven commands + config, HTTP and runtime helpers
 scripts/                       Optional official Ticketmaster API access check
 tests/                        Offline regression tests
 data/                         Versioned city seeds; generated filters ignored

@@ -8,6 +8,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from .config import RequestConfig
+from .runtime import atomic_output
 
 logger = logging.getLogger(__name__)
 
@@ -21,10 +22,14 @@ def get_json(
     config: RequestConfig,
     *,
     data: str | None = None,
+    json_data: dict | None = None,
     cookie_file: Path | None = None,
     before_request: Callable[[], None] | None = None,
+    response_path: Path | None = None,
 ) -> dict:
     """Retry transport and JSON failures, using curl for compressed responses."""
+    if data is not None and json_data is not None:
+        raise ValueError("Choose either form data or JSON data")
     command = [
         "curl",
         "--silent",
@@ -44,6 +49,8 @@ def get_json(
     ]
     if data is not None:
         command.extend(["--data", data])
+    if json_data is not None:
+        command.extend(["-H", "Content-Type: application/json", "--data", json.dumps(json_data)])
     if cookie_file is not None:
         command.extend(["--cookie", str(cookie_file), "--cookie-jar", str(cookie_file)])
     command.append(url)
@@ -57,6 +64,10 @@ def get_json(
                 text=True,
                 timeout=config.request_timeout + 5,
             )
+            # Keep the final response even when HTTP or JSON validation fails.
+            if response_path is not None:
+                with atomic_output(response_path) as handle:
+                    handle.write(result.stdout)
             if result.returncode:
                 raise ResponseError(f"curl exited {result.returncode}: {result.stderr.strip()}")
             payload = json.loads(result.stdout)
