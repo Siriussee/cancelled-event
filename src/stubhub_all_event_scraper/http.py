@@ -4,6 +4,8 @@ import json
 import logging
 import subprocess
 import time
+from collections.abc import Callable
+from pathlib import Path
 
 from .config import RequestConfig
 
@@ -14,7 +16,14 @@ class ResponseError(RuntimeError):
     """A request or JSON response cannot safely be used."""
 
 
-def get_json(url: str, config: RequestConfig, *, data: str | None = None) -> dict:
+def get_json(
+    url: str,
+    config: RequestConfig,
+    *,
+    data: str | None = None,
+    cookie_file: Path | None = None,
+    before_request: Callable[[], None] | None = None,
+) -> dict:
     """Retry transport and JSON failures, using curl for compressed responses."""
     command = [
         "curl",
@@ -35,9 +44,13 @@ def get_json(url: str, config: RequestConfig, *, data: str | None = None) -> dic
     ]
     if data is not None:
         command.extend(["--data", data])
+    if cookie_file is not None:
+        command.extend(["--cookie", str(cookie_file), "--cookie-jar", str(cookie_file)])
     command.append(url)
     for attempt in range(config.max_retries):
         try:
+            if before_request is not None:
+                before_request()
             result = subprocess.run(
                 command,
                 capture_output=True,
